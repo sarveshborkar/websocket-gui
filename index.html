@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Web Socket Chat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        #app-container {
+            width: 100%;
+            max-width: 600px;
+            background-color: #ffffff;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+        #status-container {
+            display: flex;
+            align-items: center;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        #status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        #status-dot.connected {
+            background-color: green;
+        }
+        #status-dot.disconnected {
+            background-color: red;
+        }
+        #chat-log {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #fafafa;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        .message {
+            margin-bottom: 8px;
+        }
+        .message.sent {
+            color: #007bff;
+            font-weight: bold;
+        }
+        .message.received {
+            color: #28a745;
+            font-weight: bold;
+        }
+        #message-input {
+            width: calc(100% - 100px);
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        #buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        button {
+            padding: 8px 12px;
+            font-size: 14px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            color: #fff;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        button.send-once {
+            background-color: #28a745;
+        }
+        button.send-multiple {
+            background-color: #ffc107;
+        }
+        #stats {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        .stat-item {
+            background-color: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            width: 30%;
+            font-weight: bold;
+        }
+        #loading {
+            display: none;
+            margin-top: 10px;
+            color: #6c757d;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <div id="status-container">
+            <div id="status-dot" class="disconnected"></div>
+            <div id="status" class="disconnected">Disconnected</div>
+        </div>
+        <h2>Web Socket Chat</h2>
+        <div id="chat-log"></div>
+        <input type="text" id="message-input" placeholder="Type a message...">
+        <div id="buttons">
+            <button class="send-once" onclick="sendMessageOnce()" id="send-once-button" disabled>Send Once</button>
+            <button class="send-multiple" onclick="sendMessageMultiple(10000)" id="send-multiple-button" disabled>Send 10,000 Times</button>
+        </div>
+        <div id="loading">Sending messages...</div>
+        <div id="stats">
+            <div class="stat-item" id="sent-count">Sent: 0</div>
+            <div class="stat-item" id="received-count">Received: 0</div>
+            <div class="stat-item" id="pending-count">Pending: 0</div>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+        let sentCount = 0;
+        let receivedCount = 0;
+        let pendingCount = 0;
+
+        // Initialize WebSocket connection and handle events
+        function connectWebSocket() {
+            socket = new WebSocket("ws://localhost:8765");
+
+            socket.addEventListener("open", function() {
+                updateStatus("Connected", "connected");
+                toggleSendButtons(true);
+            });
+
+            socket.addEventListener("message", function(event) {
+                displayMessage("received", event.data);
+                receivedCount++;
+                pendingCount--;
+                updateStats();
+            });
+
+            socket.addEventListener("close", function() {
+                updateStatus("Disconnected", "disconnected");
+                toggleSendButtons(false);
+                attemptReconnect();
+            });
+        }
+
+        // Attempt to reconnect after a short delay
+        function attemptReconnect() {
+            setTimeout(() => {
+                updateStatus("Attempting to reconnect...", "disconnected");
+                connectWebSocket();
+            }, 3000);
+        }
+
+        // Update connection status display
+        function updateStatus(text, statusClass) {
+            const statusElement = document.getElementById("status");
+            const statusDot = document.getElementById("status-dot");
+            statusElement.textContent = text;
+            statusElement.className = statusClass;
+            statusDot.className = statusClass;
+        }
+
+        // Enable or disable send buttons
+        function toggleSendButtons(enable) {
+            document.getElementById("send-once-button").disabled = !enable;
+            document.getElementById("send-multiple-button").disabled = !enable;
+        }
+
+        // Update stats on the page
+        function updateStats() {
+            document.getElementById("sent-count").textContent = `Sent: ${sentCount}`;
+            document.getElementById("received-count").textContent = `Received: ${receivedCount}`;
+            document.getElementById("pending-count").textContent = `Pending: ${pendingCount}`;
+        }
+
+        // Display messages in the chat log
+        function displayMessage(type, message) {
+            const chatLog = document.getElementById("chat-log");
+            const messageElement = document.createElement("div");
+            messageElement.className = `message ${type}`;
+            messageElement.textContent = `${type === 'sent' ? 'Sent' : 'Received'}: ${message}`;
+            chatLog.appendChild(messageElement);
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        // Send a single message to the server
+        function sendMessageOnce() {
+            const messageInput = document.getElementById("message-input");
+            const message = messageInput.value;
+            if (message && socket.readyState === WebSocket.OPEN) {
+                socket.send(message);
+                sentCount++;
+                pendingCount++;
+                displayMessage("sent", message);
+                updateStats();
+                messageInput.value = "";
+            }
+        }
+
+        // Send a message multiple times
+        async function sendMessageMultiple(times) {
+            const messageInput = document.getElementById("message-input");
+            const message = messageInput.value;
+            if (message && socket.readyState === WebSocket.OPEN) {
+                document.getElementById("loading").style.display = "block";
+                for (let i = 0; i < times; i++) {
+                    socket.send(message);
+                    sentCount++;
+                    pendingCount++;
+                    updateStats();
+                    await new Promise((resolve) => setTimeout(resolve, 1));
+                }
+                displayMessage("sent", `${message} (x${times})`);
+                document.getElementById("loading").style.display = "none";
+                messageInput.value = "";
+                updateStats();
+            }
+        }
+
+        // Connect WebSocket when page loads
+        window.onload = connectWebSocket;
+    </script>
+</body>
+</html>
